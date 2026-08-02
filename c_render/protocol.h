@@ -20,11 +20,14 @@
 #define CMD_PERSPECTIVE  0x04    /* Perspective: payload[0] = 0 (off) / 1 (on) */
 #define CMD_DEBUG        0x05    /* Toggle debug overlay */
 #define CMD_BARGRAPH     0x06    /* Bargraph: payload[0]=level(0-16), payload[1]=on/off */
+#define CMD_PRELOAD_MANEUVER 0x07 /* Replace current maneuver, draw transparent ready frame */
+#define CMD_START_ANIMATION  0x08 /* Start cold slide/fade for the preloaded maneuver */
+#define CMD_HIDE_DISPLAY     0x09 /* Suspend focus recovery while Java hides context 74 */
 
 /* Renderer -> Java events (high bit set to distinguish from commands) */
 #define EVT_HEARTBEAT    0x80    /* Renderer alive, sent every 1 s; empty payload */
 #define EVT_READY        0x81    /* EGL/render initialized; safe to send first command */
-#define EVT_FRAME_READY  0x82    /* At least one maneuver frame has been swapped */
+#define EVT_FRAME_READY  0x82    /* A maneuver/preload frame has been swapped */
 
 /* 48-byte command packet */
 typedef struct {

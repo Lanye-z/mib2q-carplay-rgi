@@ -58,6 +58,9 @@ public class RendererServer {
     private static final byte CMD_SHUTDOWN    = 0x03;
     private static final byte CMD_PERSPECTIVE = 0x04;
     private static final byte CMD_BARGRAPH    = 0x06;
+    private static final byte CMD_PRELOAD_MANEUVER = 0x07;
+    private static final byte CMD_START_ANIMATION  = 0x08;
+    private static final byte CMD_HIDE_DISPLAY     = 0x09;
 
     /* CMD_MANEUVER flags */
     private static final byte MAN_FLAG_SET_PERSP = 0x01;
@@ -350,8 +353,42 @@ public class RendererServer {
                                 int drivingSide, int[] junctionAngles,
                                 int bargraphLevel, int bargraphMode,
                                 int perspective) {
+        return sendManeuverCommand(CMD_MANEUVER, icon, direction, exitAngle,
+            drivingSide, junctionAngles, bargraphLevel, bargraphMode, perspective);
+    }
+
+    /**
+     * Replace the renderer state and request a transparent, defined frame.
+     * Animation starts only after sendStartAnimation().
+     */
+    public boolean sendPreloadManeuver(int icon, int direction, int exitAngle,
+                                       int drivingSide, int[] junctionAngles,
+                                       int bargraphLevel, int bargraphMode,
+                                       int perspective) {
+        frameReady = false;
+        return sendManeuverCommand(CMD_PRELOAD_MANEUVER, icon, direction, exitAngle,
+            drivingSide, junctionAngles, bargraphLevel, bargraphMode, perspective);
+    }
+
+    public boolean sendStartAnimation() {
         byte[] pkt = new byte[PKT_SIZE];
-        pkt[0] = CMD_MANEUVER;
+        pkt[0] = CMD_START_ANIMATION;
+        return sendPacket(pkt);
+    }
+
+    public boolean sendHideDisplay() {
+        byte[] pkt = new byte[PKT_SIZE];
+        pkt[0] = CMD_HIDE_DISPLAY;
+        return sendPacket(pkt);
+    }
+
+    private boolean sendManeuverCommand(byte command,
+                                        int icon, int direction, int exitAngle,
+                                        int drivingSide, int[] junctionAngles,
+                                        int bargraphLevel, int bargraphMode,
+                                        int perspective) {
+        byte[] pkt = new byte[PKT_SIZE];
+        pkt[0] = command;
         byte flags = 0;
         if (bargraphMode > 0)  flags |= MAN_FLAG_BARGRAPH;
         if (perspective >= 0)  flags |= MAN_FLAG_SET_PERSP;

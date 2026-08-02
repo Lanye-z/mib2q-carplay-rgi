@@ -4,5 +4,7 @@
 /java_test/out
 carplay_hook.jar
 libcarplay_hook.so
+!dist/r3/carplay_hook.jar
+!dist/r3/libcarplay_hook.so
 mu1316_lsd.jar
 **/.DS_Store
