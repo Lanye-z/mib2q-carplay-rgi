@@ -4,7 +4,7 @@
  * Command-driven rendering engine with TCP server.
  * Receives maneuver commands, handles all animation/transitions internally.
  *
- * macOS: GLFW window for development.
+ * macOS/Windows: GLFW window for development.
  * QNX:   take over native displayable 20 (DISPLAYABLE_MAP_ROUTE_GUIDANCE,
  *        the slot KOMO RG widget normally uses) by registering our own
  *        screen window with ID="20".  setActiveDisplayable(4, 20) (called
@@ -461,6 +461,7 @@ int main(int argc, char **argv) {
                 pending_bargraph_level = cmd.payload[44];
                 pending_bargraph_mode = cmd.payload[45];
                 got_maneuver = 1;
+                platform_set_preview_visible(1);
                 break;
             }
             case CMD_PRELOAD_MANEUVER: {
@@ -473,10 +474,12 @@ int main(int argc, char **argv) {
                 break;
             }
             case CMD_START_ANIMATION:
+                platform_set_preview_visible(1);
                 engine_start_preloaded_animation();
                 break;
             case CMD_HIDE_DISPLAY:
                 g_display_active = 0;
+                platform_set_preview_visible(0);
                 fprintf(stderr, "engine: display hidden\n");
                 break;
             case CMD_SCREENSHOT: {

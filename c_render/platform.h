@@ -1,8 +1,9 @@
 /*
  * Platform abstraction for windowing and GL context.
  *
- * macOS: GLFW + OpenGL 2.1
- * QNX:   libdisplayinit.so + EGL + GLES2
+ * macOS:   GLFW + OpenGL 2.1
+ * Windows: GLFW + OpenGL 3.3 compatibility profile
+ * QNX:     libdisplayinit.so + EGL + GLES2
  */
 
 #ifndef CR_PLATFORM_H
@@ -57,6 +58,15 @@ void platform_check_and_recover_window(void);
  * (typically the native KOMO RG widget's window).
  * Called from platform_shutdown.  No-op on non-QNX platforms. */
 void platform_release_displayable(void);
+
+/* Local-preview visibility hook.  Windows hides its GLFW window while an
+ * R3 maneuver is preloaded and shows it only when animation starts, matching
+ * the production gfx/context gate.  This compiles away on production QNX. */
+#ifdef PLATFORM_WINDOWS
+void platform_set_preview_visible(int visible);
+#else
+#define platform_set_preview_visible(visible) ((void)(visible))
+#endif
 
 /* Key codes for test navigation */
 #define CR_KEY_LEFT   0

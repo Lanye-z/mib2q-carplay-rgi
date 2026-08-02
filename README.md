@@ -1109,6 +1109,33 @@ All classes are compiled with `-source 1.2 -target 1.2` for MHI2Q JVM compatibil
 
 https://github.com/luka-dev/mib2q-carplay-rgi/raw/main/docs/test_manuver_render.mov
 
+#### Windows
+
+The R3 branch includes a prebuilt, dependency-free Windows preview in
+[`dist/local-test-windows`](dist/local-test-windows). It runs the actual C
+renderer and uses a PowerShell TCP harness to emulate Java `RendererServer`.
+
+```powershell
+cd dist\local-test-windows
+powershell -ExecutionPolicy Bypass -File .\local_test_renderer.ps1
+```
+
+Press `F` to execute the exact R3 first-real-maneuver sequence
+(`PRELOAD_MANEUVER -> EVT_FRAME_READY -> 100 ms -> START_ANIMATION`), `E` to
+test hide/re-entry, arrow keys for normal subsequent maneuvers, or `A` for an
+automated scenario. See the directory README for all controls and screenshots.
+
+To rebuild the Windows executable from source:
+
+```powershell
+.\compile_render_windows.ps1
+```
+
+The build script pins Zig 0.16.0 and GLFW 3.4. Downloaded tools stay under
+`.tools` and are not committed.
+
+#### macOS
+
 The macOS build includes a **test harness** (`build/test_harness`) that sends TCP commands to the renderer, letting you cycle through all maneuver types and verify animations without a real device.
 
 Run both in parallel from the repo root. The harness is the TCP server;

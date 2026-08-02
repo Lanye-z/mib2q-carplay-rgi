@@ -1,7 +1,10 @@
 .idea
 .claude
+.tools/
 /java_patch/out
 /java_test/out
+c_render/screenshot_*.ppm
+dist/local-test-windows/snap_*.ppm
 carplay_hook.jar
 libcarplay_hook.so
 !dist/r3/carplay_hook.jar

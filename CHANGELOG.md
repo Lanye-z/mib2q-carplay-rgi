@@ -6,6 +6,15 @@ Base: [`luka-dev/mib2q-carplay-rgi`](https://github.com/luka-dev/mib2q-carplay-r
 
 Build ID: `2026-08-02-real-maneuver-sync-r3`
 
+### Windows 本地测试工具 / Windows Local Test Tool
+
+- 新增 Windows 原生 `c_render_windows.exe`，复用实际 C renderer、几何和动画状态机。
+- 新增 PowerShell TCP harness，可模拟 R3 预加载、frame-ready、100 ms 延迟、动画启动、隐藏和再次进入。
+- 新增自动测试模式和首箭头、后续箭头、重新进入三组 framebuffer 示例图。
+- 新增固定 Zig 0.16.0 与 GLFW 3.4 的可复现 Windows 构建脚本。
+- The Windows preview uses the real C renderer and an R3-aware PowerShell TCP harness. It supports automated first-maneuver, subsequent-maneuver, hide, and re-entry validation.
+- This tool validates geometry and renderer timing only; QNX displaymanager, MOST encoding, context 72/74, and the physical cluster remain vehicle-only tests.
+
 ### 中文
 
 #### 修改目标
