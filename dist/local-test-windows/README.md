@@ -51,3 +51,12 @@ This utility compiles and runs the project's actual `render.c`, `maneuver.c`, `r
 Run `run_local_test.cmd` or `powershell -ExecutionPolicy Bypass -File .\local_test_renderer.ps1`. Press `F` for the exact R3 preload/frame-ready/100 ms/start sequence, arrow keys for normal subsequent maneuvers, `E` for hide/re-entry, and `A` for the automated scenario. The Windows executable has no bundled runtime DLL dependency.
 
 This preview validates renderer geometry, command handling, and animation timing. It cannot reproduce the vehicle's display manager, MOST encoder, context 72/74 switching, or cluster LCD timing.
+
+For the longer upstream-vs-R3 comparison, run both complex scenarios:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\local_test_renderer.ps1 -Scenario Original
+powershell -ExecutionPolicy Bypass -File .\local_test_renderer.ps1 -Scenario R3
+```
+
+The event timelines, generated key frames, and bilingual analysis are written to [`complex-scenario`](complex-scenario/README.md).
