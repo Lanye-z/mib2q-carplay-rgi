@@ -295,10 +295,14 @@ public class ManeuverMapper {
             case MT_U_TURN:
             case MT_START_ROUTE_WITH_U_TURN:
             case MT_U_TURN_WHEN_POSSIBLE:
-                /* MHI3 uses a left/right variant depending on driving side. */
                 mainElement = UTURN;
-                if (drivingSide == DRIVING_SIDE_LEFT) direction = DIR_RIGHT;
-                else direction = DIR_LEFT;
+                /* Prefer CarPlay's signed JunctionElementExitAngle. If iOS
+                 * omits it, use China's RHT convention: turn around left. */
+                if (hasDirectionalTurnAngle(turnAngle)) {
+                    direction = (turnAngle < 0) ? DIR_LEFT : DIR_RIGHT;
+                } else {
+                    direction = DIR_LEFT;
+                }
                 break;
 
             case MT_OFF_RAMP:
@@ -372,6 +376,10 @@ public class ManeuverMapper {
         direction = applyDsiNavBapDirectionOverride(maneuverType, direction);
 
         return new int[] { mainElement, direction };
+    }
+
+    private static boolean hasDirectionalTurnAngle(int turnAngle) {
+        return turnAngle != 0 && turnAngle != 1000 && turnAngle != -1000;
     }
 
     private static int applyDsiNavBapDirectionOverride(int maneuverType, int dir) {

@@ -197,7 +197,15 @@ public class RendererServer {
                 handleRendererEvent(owned, buf[0]);
             }
         } catch (IOException e) {
-            if (running) {
+            boolean unexpected;
+            synchronized (lock) {
+                /* disconnectClient()/dispose() clear sock before closing it.
+                 * Do not report that intentional EOF as renderer death: the
+                 * death listener would otherwise respawn maneuver_render
+                 * while teardown is trying to return the cluster to ctx 72. */
+                unexpected = running && sock == owned;
+            }
+            if (unexpected) {
                 Log.i(TAG, "reader exit: " + e.getClass().getSimpleName()
                         + (e.getMessage() == null ? "" : " " + e.getMessage()));
                 notifyDeath(e.getClass().getSimpleName()

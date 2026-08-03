@@ -1403,14 +1403,13 @@ public class ClusterService implements NaviMoKoKDKConstants, PowerEventListener 
     }
 
     /**
-     * Deactivate custom renderer pipeline. Stop encoding and restore context.
+     * Deactivate the custom renderer and leave the cluster in its neutral
+     * navigation context. Context 74 keeps the stock composition definition,
+     * but must not remain active without an owning displayable 20: a later
+     * stock or CarPlay 72 -> 74 transition is what binds the new window.
      */
     public void deactivateCustomRendererPipeline() {
-        /* Backstop for renderer teardown: the renderer normally restores
-         * context 74 from its own atexit handler, but Java may have to slay
-         * the process if TCP teardown races.  Re-declare the native context
-         * here so the cluster compositor doesn't keep our (now destroyed)
-         * screen window mapped to displayable 20. */
+        /* Re-declare the native layout before leaving the active context. */
         try {
             de.audi.atip.util.CommandLineExecuter.executeCommand(
                 "/bin/sh", new String[] { "-c", "/eso/bin/apps/dmdt dc 74 20 102 101 33 >/dev/null 2>&1" });
@@ -1421,7 +1420,7 @@ public class ClusterService implements NaviMoKoKDKConstants, PowerEventListener 
         try {
             de.audi.atip.hmi.view.IDisplayManager dm =
                 ((de.audi.atip.hmi.HMIService) this.env.getHMIService()).getDisplayManager();
-            dm.switchContext(74, 1, null);
+            dm.switchContext(72, 1, null);
         } catch (Throwable t) {
             /* non-fatal */
         }

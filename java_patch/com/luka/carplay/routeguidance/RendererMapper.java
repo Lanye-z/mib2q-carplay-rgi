@@ -113,6 +113,20 @@ public class RendererMapper {
      */
     public static int mapDirection(int mt, int turnAngle, int drivingSide) {
         switch (mt) {
+            /* iAP2 JunctionElementExitAngle is signed: negative turns left,
+             * positive turns right.  Prefer it for U-turns instead of
+             * guessing from driving side.  Some senders omit the angle and
+             * publish the 1000 sentinel; only then use China's right-hand
+             * traffic convention (left U-turn) as the fallback. */
+            case ManeuverMapper.MT_U_TURN:
+            case ManeuverMapper.MT_START_ROUTE_WITH_U_TURN:
+            case ManeuverMapper.MT_U_TURN_WHEN_POSSIBLE:
+                if (turnAngle != ANGLE_UNKNOWN && turnAngle != -ANGLE_UNKNOWN
+                        && turnAngle != 0) {
+                    return (turnAngle < 0) ? -1 : 1;
+                }
+                return -1;
+
             /* Merge: direction from driving side */
             case ManeuverMapper.MT_ON_RAMP:
                 return (drivingSide == ManeuverMapper.DRIVING_SIDE_LEFT) ? -1 : 1;

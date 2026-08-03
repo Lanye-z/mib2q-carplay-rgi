@@ -1,5 +1,43 @@
 # Changelog / 更新日志
 
+## R4 - Neutral Context Restore + Directional U-turn / 中性 Context 恢复与掉头方向修复 (2026-08-03)
+
+Build ID: `2026-08-03-neutral-context-uturn-r4`
+
+### English
+
+- Restores the stock context-74 composition during CarPlay teardown, but leaves display 1 on neutral context 72. The next stock-navigation or CarPlay owner must therefore perform a real 72 -> 74 transition and bind its newly-created displayable 20.
+- Applies the same 72 teardown target in both Java `ClusterService` and the QNX renderer `restore_display()` path, preventing the last cleanup writer from returning to an empty context 74.
+- Removes the shutdown decision based on `RouteManager.getRoute() != null`; a cached route object is not treated as proof of active stock guidance.
+- Ignores intentional renderer socket closure in the death detector so route teardown cannot accidentally respawn `maneuver_render` while context 72 is being restored.
+- Uses CarPlay's signed `JunctionElementExitAngle` for U-turn direction: negative is left and positive is right. A missing angle (`0` or `+/-1000`) falls back to China's right-hand-traffic convention (left U-turn), independent of a stale `driving_side` field.
+- Adds maneuver direction diagnostics and regression coverage for left/right U-turn mapping.
+
+Expected ownership sequence:
+
+```text
+CarPlay stops:       restore context-74 definition, active context 74 -> 72
+CarPlay starts again: create displayable 20, preload real frame, context 72 -> 74
+Stock nav starts:     create stock displayable 20, stock context 72 -> 74
+```
+
+### 中文
+
+- CarPlay 退出时恢复原车 context 74 的布局定义，但让显示 1 停留在中性 context 72。之后无论原车导航还是 CarPlay 再次启动，都必须执行真实的 72 -> 74 切换，从而把新创建的 displayable 20 正确绑定到编码链路。
+- Java `ClusterService` 与 QNX renderer 的 `restore_display()` 统一恢复到 72，避免最后执行的清理逻辑再次留下一个没有有效 displayable 20 的空 context 74。
+- 删除退出时基于 `RouteManager.getRoute() != null` 的判断；缓存的 Route 对象不再被当作原车路线引导仍然活动的证据。
+- renderer 主动断开 socket 时不再被死亡检测误判，避免退出过程中意外重启 `maneuver_render` 并重新抢占显示。
+- 掉头方向优先采用 CarPlay 的有符号 `JunctionElementExitAngle`：负值为左掉头，正值为右掉头；角度缺失（`0` 或 `+/-1000`）时固定按照中国右侧通行习惯回退为左掉头，不受异常 `driving_side` 字段影响。
+- 增加 maneuver 方向诊断日志和左右掉头映射回归测试。
+
+预期所有权切换：
+
+```text
+CarPlay 停止：     恢复 74 定义，活动 context 74 -> 72
+CarPlay 再次启动： 创建 displayable 20，预加载真实帧，context 72 -> 74
+原车导航启动：     创建原车 displayable 20，由原车执行 context 72 -> 74
+```
+
 ## R3 - Real Maneuver Sync / 真实 Maneuver 同步版 (2026-08-02)
 
 Base: [`luka-dev/mib2q-carplay-rgi`](https://github.com/luka-dev/mib2q-carplay-rgi), upstream commit `1832d6e`.

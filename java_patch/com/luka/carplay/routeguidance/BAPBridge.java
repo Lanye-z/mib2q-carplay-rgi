@@ -685,41 +685,11 @@ public class BAPBridge {
             }
             if (gatedService != null) gatedService.blockRouteGuidance = false;
 
-            /*
-             * Tear down our cluster RG-state override CONDITIONALLY.
-             *
-             * forceClusterRouteInfoState(false) sets
-             * dsiResponseContainer.rgActive=false.  Stock cluster firmware's
-             * RgStopGuidanceGeneralCommand.execute() short-circuits with
-             * commandFinished() when rgActive==false AND
-             * rgRouteCalculationState==0 — which means the user's
-             * "Cancel Map Guidance" button on the MMI map silently does
-             * nothing if we leave rgActive=false here while native nav
-             * still has an active internal route.
-             *
-             * Decision: only clear our override if native nav has NO route.
-             * If native nav has a route (persisted through our session),
-             * leave rgActive=true so its own Cancel command can run.  Native
-             * nav drives rgActive itself — it'll go back to false naturally
-             * when the user cancels or arrives.
-             */
-            boolean nativeHasRoute = false;
-            try {
-                de.audi.tghu.navi.app.Navigation navi =
-                    de.audi.tghu.navi.app.Navigation.getInstance();
-                if (navi != null) {
-                    de.audi.tghu.navi.app.routeguidance.IRouteManager rm = navi.getRouteManager();
-                    if (rm != null && rm.getRoute() != null) {
-                        nativeHasRoute = true;
-                    }
-                }
-            } catch (Throwable t) { /* assume false on error */ }
-
-            if (nativeHasRoute) {
-                Log.i(TAG, "Shutdown: native nav has active route — leaving rgActive=true so its Cancel still works");
-            } else {
-                forceClusterRouteInfoState(false);
-            }
+            /* stopRouteGuidance() cancels stock guidance before CarPlay takes
+             * ownership. A cached Route object is not proof that guidance is
+             * still active, so always release our cluster state here. Stock
+             * navigation will establish its own state on its next start. */
+            forceClusterRouteInfoState(false);
             forceGfxAvailable(false);
 
             Log.i(TAG, "Shutdown (full teardown)");
@@ -2047,6 +2017,10 @@ public class BAPBridge {
             int direction = RendererMapper.mapDirection(mt, s.mTurnAngle[firstIdx], s.mDrivingSide[firstIdx]);
             int exitAngle = RendererMapper.mapExitAngle(mt, s.mTurnAngle[firstIdx]);
             int drivingSide = s.mDrivingSide[firstIdx];
+
+            Log.d(TAG, "CR maneuver idx=" + firstIdx + " type=" + mt
+                + " icon=" + icon + " dir=" + direction
+                + " angle=" + exitAngle + " drivingSide=" + drivingSide);
 
             /* Skip if icon hasn't actually changed.
              * Slot version (mVer) detects maneuver transitions even when

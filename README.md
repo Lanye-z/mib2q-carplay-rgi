@@ -5,7 +5,7 @@ CarPlay patch set for Audi MHI2Q infotainment.
 
 **Disclaimer:** Use at your own risk. These patches modify firmware binaries and system configurations on your infotainment unit. Always back up all original files before making any changes. The authors are not responsible for any damage, bricked devices, or warranty issues resulting from use of these patches.
 
-> **R3 experimental build (2026-08-02):** The `real-maneuver-sync-r3` variant removes the synthetic straight-ahead startup placeholder and shows the custom renderer only when a real maneuver enters its approach zone. Source changes, behavior details, bilingual release notes, and the matched four-file deployment set are available in [CHANGELOG.md](CHANGELOG.md) and [`dist/r3`](dist/r3).
+> **R4 experimental build (2026-08-03):** The `neutral-context-uturn-r4` variant returns the cluster to context 72 after CarPlay guidance, allowing either stock navigation or a later CarPlay route to acquire displayable 20 cleanly. It also follows CarPlay's signed exit angle for left/right U-turns. Source changes, bilingual details, and the matched deployment set are available in [CHANGELOG.md](CHANGELOG.md) and [`dist/r4`](dist/r4).
 
 ## Gallery
 
