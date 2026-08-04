@@ -1,5 +1,35 @@
 # Changelog / 更新日志
 
+## R4.1 - Lazy Renderer + Guaranteed Gate Release / 延迟 Renderer 与可靠接管释放 (2026-08-04)
+
+Build ID: `2026-08-04-lazy-renderer-gate-release-r4.1`
+
+### English
+
+- Launches `maneuver_render` only when a valid real maneuver enters the approach zone, so displayable 20 is not created during an empty CarPlay route state.
+- Keeps the native framebuffer fully transparent until a maneuver exists. A zero-initialized renderer state can no longer leak `ICON_APPROACH` as a permanent straight arrow.
+- Draws and prepares maneuver geometry only when `g_engine.has_current` is true.
+- Commits renderer deduplication fields only after a successful socket send, allowing the same maneuver to retry when its first startup send fails.
+- Resets deduplication state when prepared-renderer activation aborts.
+- Moves renderer cleanup and native route-guidance gate release into an unconditional shutdown path, so an earlier BAP teardown exception cannot leave stock navigation blocked.
+- Runs process, socket, gfx, route-info, and context cleanup even when Java state flags are stale.
+- Retains R4's neutral context-72 teardown and signed U-turn direction mapping.
+
+R4.1 remains a vehicle-test candidate. Replace `carplay_hook.jar` and `maneuver_render` together; do not combine the R4.1 JAR with an older renderer.
+
+### 中文
+
+- 仅在有效真实 maneuver 进入接近区后启动 `maneuver_render`，避免 CarPlay 路线尚无可显示内容时提前创建 displayable 20。
+- 在收到 maneuver 前保持原生帧缓冲完全透明，零初始化状态不再把 `ICON_APPROACH` 泄漏成永久直行箭头。
+- 只有 `g_engine.has_current` 为真时才准备和绘制箭头几何。
+- 仅在 socket 发送成功后提交 renderer 去重字段；首次启动发送失败时，相同 maneuver 可以继续重试。
+- 预加载激活中止时重置去重状态。
+- renderer 清理和原车导航 gate 释放改为无条件退出路径，前面的 BAP 清理异常不再导致原车导航长期被阻止。
+- 即使 Java 状态标志失真，也执行进程、socket、gfx、route-info 和 context 兜底清理。
+- 保留 R4 的中性 context 72 退出方案和有符号掉头方向映射。
+
+R4.1 仍属于实车测试候选。必须同时替换 `carplay_hook.jar` 和 `maneuver_render`，不得将 R4.1 JAR 与旧版 renderer 混用。
+
 ## R4 - Neutral Context Restore + Directional U-turn / 中性 Context 恢复与掉头方向修复 (2026-08-03)
 
 Build ID: `2026-08-03-neutral-context-uturn-r4`

@@ -83,8 +83,11 @@ typedef struct {
 
 static cr_engine_t g_engine;
 
-/* Fade-in on cold start */
-static float g_fade_alpha = 1.0f;
+/* Fade-in on cold start.  Keep the surface transparent until a real
+ * maneuver has been preloaded.  A zero-initialized maneuver has icon 0
+ * (ICON_APPROACH), so starting at alpha=1 leaks a straight arrow whenever
+ * context 74 is already active before Java deliberately exposes us. */
+static float g_fade_alpha = 0.0f;
 static int   g_fade_active = 0;
 static int   g_preload_pending = 0;
 static int   g_frame_ready_pending = 0;
@@ -389,6 +392,7 @@ int main(int argc, char **argv) {
     /* Engine starts with no current maneuver */
     memset(&g_engine, 0, sizeof(g_engine));
     g_engine.phase = ENGINE_IDLE;
+    render_set_global_alpha(0.0f);
 
     fprintf(stderr, "c_render: ready, waiting for commands on :%d\n", CR_TCP_PORT);
     cr_server_mark_ready();
@@ -625,14 +629,16 @@ int main(int argc, char **argv) {
 #endif
 
             maneuver_state_t *next_ptr = g_engine.has_next ? &g_engine.next : NULL;
-            maneuver_prepare_frame(&g_engine.current, next_ptr);
+            if (g_engine.has_current)
+                maneuver_prepare_frame(&g_engine.current, next_ptr);
 #ifdef CR_DIAG_FRAME_LOG
             struct timespec t_after_prep;
             clock_gettime(CLOCK_MONOTONIC, &t_after_prep);
 #endif
 
             render_begin_frame();
-            maneuver_draw(&g_engine.current, next_ptr);
+            if (g_engine.has_current)
+                maneuver_draw(&g_engine.current, next_ptr);
             if (g_bargraph_alpha > 0.0f) {
                 float ba = g_bargraph_alpha * g_fade_alpha;
                 int bl = g_bargraph_level;

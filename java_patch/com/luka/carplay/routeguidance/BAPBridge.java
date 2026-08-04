@@ -570,15 +570,20 @@ public class BAPBridge {
             /* Block native route-guidance BAP stream during CarPlay RG. */
             if (gatedService != null) gatedService.blockRouteGuidance = true;
 
-            /* Start renderer FIRST — takes over native displayable 20
-             * (DISPLAYABLE_MAP_ROUTE_GUIDANCE, the KOMO RG widget slot) by
-             * registering our screen window with ID="20" in displaymanager's
-             * m_surfaceSources.  Doing this before we set rgActive/rgiValid
-             * avoids a one-frame KDK flicker. */
-            startCustomRenderer();
+            /* Do not create displayable 20 yet.  On QNX, merely launching the
+             * renderer registers its window immediately; if context 74 is
+             * still active, the zero-initialized frame can leak as a permanent
+             * straight arrow before any real maneuver is available.  The
+             * renderer is launched lazily on the first approach maneuver. */
+            try {
+                if (csRef != null) csRef.deactivateCustomRendererPipeline();
+            } catch (Throwable t) {
+                Log.w(TAG, "CR: initial neutral-context reset failed: " + t.getMessage());
+            }
+            forceGfxAvailable(false);
 
-            /* Now safe to set cluster state flags — our window owns
-             * displayable 20, encoder reads it via setActiveDisplayable(4,20). */
+            /* Keep the BAP/route-information state active while the custom
+             * displayable remains absent and context 72 hides the widget. */
             forceClusterRouteInfoState(true);
 
             /*
@@ -607,7 +612,7 @@ public class BAPBridge {
             }
 
             Log.i(TAG, "Started (rgType=" + ACTIVE_RGTYPE
-                + ", cr=" + customRendererStarted + ")");
+                + ", cr=" + customRendererStarted + ", lazy=true)");
 
         } catch (Throwable e) {
             Log.e(TAG, "onStart error: " + e.getClass().getName() + ": " + e.getMessage());
@@ -674,27 +679,22 @@ public class BAPBridge {
             traceBap("updateLaneGuidance", "[],false");
             appConnectorNavi.updateLaneGuidance(false, new CombiBAPNaviLaneGuidanceData[0]);
 
+        } catch (Throwable e) {
+            Log.e(TAG, "onShutdown BAP teardown error", e);
+        } finally {
+            /* Cleanup must not depend on every BAP status write succeeding.
+             * A single service exception previously skipped renderer shutdown
+             * and left the native route-guidance gate closed indefinitely. */
             stopCustomRenderer();
-            /* CarPlay session ending — release the renderer listen socket
-             * (port :19800).  stopCustomRenderer keeps it bound for fast
-             * route restarts within a session; full session shutdown
-             * actually closes it. */
             if (rendererClient != null) {
-                rendererClient.dispose();
+                try { rendererClient.dispose(); }
+                catch (Throwable t) { Log.w(TAG, "renderer dispose failed: " + t.getMessage()); }
                 rendererClient = null;
             }
-            if (gatedService != null) gatedService.blockRouteGuidance = false;
-
-            /* stopRouteGuidance() cancels stock guidance before CarPlay takes
-             * ownership. A cached Route object is not proof that guidance is
-             * still active, so always release our cluster state here. Stock
-             * navigation will establish its own state on its next start. */
+            releaseNativeRouteGuidanceGate("session shutdown");
             forceClusterRouteInfoState(false);
             forceGfxAvailable(false);
-
             Log.i(TAG, "Shutdown (full teardown)");
-        } catch (Exception e) {
-            Log.e(TAG, "onShutdown error", e);
         }
     }
 
@@ -1072,6 +1072,10 @@ public class BAPBridge {
              * instead of leaving the previous arrow latched on the cluster. */
             if (customRendererStarted && !rendererApproach) {
                 hideCustomRendererForCruise();
+            }
+
+            if (!customRendererPrepared && !customRendererStarted && rendererApproach) {
+                startCustomRenderer();
             }
 
             if (customRendererPrepared && !customRendererStarted && rendererApproach) {
@@ -1707,6 +1711,7 @@ public class BAPBridge {
                     }
                     Log.i(TAG, "CR: route stop confirmed; shutting down renderer");
                     stopCustomRenderer();
+                    releaseNativeRouteGuidanceGate("confirmed CarPlay route stop");
                 }
             }
         }, "CRRouteStop");
@@ -1850,6 +1855,11 @@ public class BAPBridge {
         Log.w(TAG, "CR: " + reason + "; renderer disabled for this route");
         customRendererPrepared = false;
         customRendererStarted = false;
+        lastCrIcon = -1;
+        lastCrDirection = -99;
+        lastCrExitAngle = -9999;
+        lastCrDrivingSide = -1;
+        lastCrVer = -1;
         try {
             if (csRef != null) csRef.deactivateCustomRendererPipeline();
         } catch (Throwable t) { /* ignore */ }
@@ -1957,33 +1967,41 @@ public class BAPBridge {
     }
 
     private synchronized void stopCustomRenderer() {
-        if (!customRendererStarted && !customRendererPrepared) return;
-        try {
-            /* Lightweight teardown: send CMD_SHUTDOWN, close client
-             * socket — but KEEP the server listen socket open for the
-             * next route in this session.  Renderer port :19800 is
-             * always-on once activated, so a fresh maneuver_render can
-             * connect immediately without re-bind delay. */
-            if (rendererClient != null) {
-                rendererClient.disconnectClient();
-            }
-            try { Thread.sleep(500); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
-            if (csRef != null) {
-                csRef.deactivateCustomRendererPipeline();
-            }
-            /* slay as backstop — ensures no orphan even if TCP shutdown missed */
-            try {
-                de.audi.atip.util.CommandLineExecuter.executeCommand(
-                    "/bin/sh", new String[] { "-c", CR_KILL_CMD });
-            } catch (Throwable t2) { /* ignore */ }
-            forceGfxAvailable(false);
-            forceClusterRouteInfoState(false);
-            customRendererPrepared = false;
-            customRendererStarted = false;
-            Log.i(TAG, "CR: stopped (server socket persists for next route)");
-        } catch (Throwable t) {
-            Log.w(TAG, "CR stop failed: " + t.getClass().getName() + ": " + t.getMessage());
+        /* Always run the backstop cleanup.  State flags can be stale after an
+         * exception, while an orphan process still owns displayable 20. */
+        if (rendererClient != null) {
+            try { rendererClient.disconnectClient(); }
+            catch (Throwable t) { Log.w(TAG, "CR disconnect failed: " + t.getMessage()); }
         }
+        try { Thread.sleep(500); }
+        catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+        try {
+            if (csRef != null) csRef.deactivateCustomRendererPipeline();
+        } catch (Throwable t) {
+            Log.w(TAG, "CR context teardown failed: " + t.getMessage());
+        }
+        try {
+            de.audi.atip.util.CommandLineExecuter.executeCommand(
+                "/bin/sh", new String[] { "-c", CR_KILL_CMD });
+        } catch (Throwable t) {
+            Log.w(TAG, "CR slay backstop failed: " + t.getMessage());
+        }
+        forceGfxAvailable(false);
+        forceClusterRouteInfoState(false);
+        customRendererPrepared = false;
+        customRendererStarted = false;
+        lastCrIcon = -1;
+        lastCrDirection = -99;
+        lastCrExitAngle = -9999;
+        lastCrDrivingSide = -1;
+        lastCrVer = -1;
+        Log.i(TAG, "CR: stopped (server socket persists for next route)");
+    }
+
+    private void releaseNativeRouteGuidanceGate(String reason) {
+        if (gatedService == null) return;
+        gatedService.blockRouteGuidance = false;
+        Log.i(TAG, "Native route-guidance gate released (" + reason + ")");
     }
 
     /**
@@ -2038,12 +2056,6 @@ public class BAPBridge {
                     && ver == lastCrVer) {
                 return false;
             }
-            lastCrIcon = icon;
-            lastCrDirection = direction;
-            lastCrExitAngle = exitAngle;
-            lastCrDrivingSide = drivingSide;
-            lastCrVer = ver;
-
             int[] junctionAngles = (s.mJunctionAngles != null && firstIdx < s.mJunctionAngles.length)
                 ? s.mJunctionAngles[firstIdx] : null;
 
@@ -2074,6 +2086,16 @@ public class BAPBridge {
                     perspective);
             }
             noteRendererSendResult(ok);
+            if (ok) {
+                /* Commit dedup state only after the frame was accepted.  If the
+                 * initial socket send races renderer startup, the next BAP
+                 * update must retry the same maneuver instead of suppressing it. */
+                lastCrIcon = icon;
+                lastCrDirection = direction;
+                lastCrExitAngle = exitAngle;
+                lastCrDrivingSide = drivingSide;
+                lastCrVer = ver;
+            }
             return ok;
         } catch (Throwable e) {
             Log.w(TAG, "CR update failed: " + e.getClass().getName() + ": " + e.getMessage());
@@ -2090,14 +2112,16 @@ public class BAPBridge {
         if (rendererClient == null || !customRendererStarted) return;
         int icon = RendererMapper.ICON_APPROACH;
         if (icon == lastCrIcon) return;  /* already showing follow street */
-        lastCrIcon = icon;
-        lastCrDirection = 0;
-        lastCrExitAngle = 0;
-        lastCrDrivingSide = 0;
-        lastCrVer = -1;
         try {
             boolean ok = rendererClient.sendManeuver(icon, 0, 0, 0, null, 0, 0, 1);
             noteRendererSendResult(ok);
+            if (ok) {
+                lastCrIcon = icon;
+                lastCrDirection = 0;
+                lastCrExitAngle = 0;
+                lastCrDrivingSide = 0;
+                lastCrVer = -1;
+            }
         } catch (Throwable t) {
             Log.w(TAG, "CR follow street failed: " + t.getMessage());
             noteRendererSendResult(false);
