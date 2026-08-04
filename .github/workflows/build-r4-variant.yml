@@ -1,0 +1,44 @@
+name: Build R4.3 always-on
+
+on:
+  push:
+    paths:
+      - '.github/workflows/build-r4-variant.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: '8'
+      - name: Apply R4.3 source changes
+        run: python3 tools/apply_r4_variant.py r4.3
+      - name: Build and verify JAR
+        run: python3 tools/build_r4_variant.py r4.3
+      - name: Validate source diff
+        run: git diff --check
+      - name: Commit generated repository
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add java_patch/com/luka/carplay/routeguidance/BAPBridge.java \
+                  java_patch/com/luka/carplay/routeguidance/RouteGuidance.java \
+                  build_java.sh CHANGELOG.md VARIANT_README.md dist/r4.3
+          git commit -m "Build R4.3 always-on variant"
+          git push origin HEAD:${GITHUB_REF_NAME}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r4.3-carplay-hook
+          path: |
+            dist/r4.3/carplay_hook.jar
+            dist/r4.3/README.md
+            dist/r4.3/SHA256SUMS
