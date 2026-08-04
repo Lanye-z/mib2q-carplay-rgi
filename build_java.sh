@@ -44,7 +44,7 @@ rm -rf "$OUTPUT_DIR"
 mkdir -p "$OUTPUT_DIR" "$BUILD_DIR"
 
 # Generate BUILD_ID (date + short git hash)
-BUILD_ID="$(date +%Y-%m-%d)-$(git -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || echo 'nogit')"
+BUILD_ID="${CARPLAY_BUILD_ID:-2026-08-05-r4.2.2-context72}"
 echo "Build ID: $BUILD_ID"
 
 # Inject BUILD_ID into CarPlayHook.java (restore on exit)

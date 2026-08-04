@@ -55,8 +55,22 @@ public class BAPBridge {
      * Fixed maneuver thresholds (meters).
      * These are intentionally static (no speed/time conversion at runtime).
      */
-    private static final int CITY_PREPARE_THRESHOLD_M = 1500;
-    private static final int HIGHWAY_PREPARE_THRESHOLD_M = 3000;
+    /* R4_VARIANT_POLICY: r4.2.2
+     * Simple and deterministic threshold policy:
+     * - route step > 2 km: expose the real maneuver at 1000 m
+     * - otherwise: expose it at 350 m
+     * - when step length is unavailable, explicit highway maneuver types are
+     *   used only as a fallback.
+     */
+    private static final int CITY_PREPARE_THRESHOLD_M = 350;
+    private static final int HIGHWAY_PREPARE_THRESHOLD_M = 1000;
+    private static final int HIGHWAY_STEP_THRESHOLD_M = 2000;
+
+    private static final int WINDOW_POLICY_SOFT_HIDE = 1;
+    private static final int WINDOW_POLICY_CONTEXT_72 = 2;
+    private static final int WINDOW_POLICY_ALWAYS_ON = 3;
+    private static final int WINDOW_POLICY = WINDOW_POLICY_CONTEXT_72;
+
     private static final int BARGRAPH_ACTION_PERCENT_OF_PREPARE = 15;
     private static final int BARGRAPH_BLINK_PERCENT = 20;
     private static final int ACTION_BLINK_INTERVAL_MS = 600;
@@ -73,6 +87,11 @@ public class BAPBridge {
      * custom renderer window remains hidden).
      */
     private boolean inApproachZone = false;
+    /* The first primary maneuver is allowed to expose ICON_APPROACH even when
+     * it is farther than the approach threshold.  Once the primary slot/version
+     * changes, normal per-version window policy takes over. */
+    private boolean firstPrimaryPending = true;
+    private boolean customRendererSoftHidden = false;
     /* Track the primary maneuver's slot identity so we know when iOS
      * actually swapped the head of the list vs. just reordered/extended it.
      * mVer changes when the C hook reassigns a slot to a new iAP2 index. */
@@ -526,6 +545,8 @@ public class BAPBridge {
         try {
             markCustomRendererRouteActive();
             inApproachZone = false;
+            firstPrimaryPending = true;
+            customRendererSoftHidden = false;
             lastFirstManeuverIdx = -1;
             lastFirstManeuverVer = -1;
             latchedTurnToText = "";
@@ -744,7 +765,7 @@ public class BAPBridge {
                     && firstIdx < s.mDistance.length) ? s.mDistance[firstIdx] : -1;
             boolean isHighway;
             if (rawStepM > 0) {
-                isHighway = rawStepM > 1500;
+                isHighway = rawStepM > HIGHWAY_STEP_THRESHOLD_M;
             } else {
                 isHighway = (type0 >= 0) && ManeuverMapper.isHighwayManeuver(type0);
             }
@@ -770,6 +791,13 @@ public class BAPBridge {
             boolean primaryChanged = (firstIdx != lastFirstManeuverIdx)
                 || (currentFirstVer != lastFirstManeuverVer);
             if (primaryChanged) {
+                /* A real slot/version transition after the first valid primary
+                 * ends the startup exception.  Later far maneuvers follow the
+                 * selected window policy instead of remaining visible merely
+                 * because they are first in a refreshed list. */
+                if (lastFirstManeuverIdx >= 0) {
+                    firstPrimaryPending = false;
+                }
                 inApproachZone = false;
                 lastFirstManeuverIdx = firstIdx;
                 lastFirstManeuverVer = currentFirstVer;
@@ -814,6 +842,39 @@ public class BAPBridge {
 
             if (explicitClear || shouldClearManeuver) {
                 latchedTurnToText = "";
+            }
+
+            /* Decide renderer visibility once and reuse the exact same state
+             * for preparation and the final renderer update.  Starting the
+             * renderer on a helper thread overlaps its READY wait with the BAP
+             * descriptor/distance/ExitView work below. */
+            boolean rendererApproach = nowApproach
+                && showManeuver
+                && hasManeuverList
+                && !explicitClear
+                && !shouldClearManeuver;
+            boolean rendererHasValidState = showManeuver
+                && hasManeuverList
+                && hasUsableDistance
+                && !explicitClear
+                && !shouldClearManeuver;
+            boolean rendererTransientState = customRendererStarted
+                && hasAnyManeuver
+                && !explicitClear
+                && !shouldClearManeuver
+                && (!hasManeuverList || !hasUsableDistance);
+            boolean rendererFollowStreet = rendererHasValidState && !rendererApproach;
+            boolean rendererShouldBeVisible;
+            if (WINDOW_POLICY == WINDOW_POLICY_ALWAYS_ON) {
+                rendererShouldBeVisible = rendererHasValidState || rendererTransientState;
+            } else {
+                rendererShouldBeVisible = rendererApproach
+                    || (firstPrimaryPending && rendererHasValidState)
+                    || rendererTransientState;
+            }
+            if (rendererShouldBeVisible && rendererHasValidState
+                    && !customRendererPrepared && !customRendererStarted) {
+                startCustomRendererAsync();
             }
 
             /*
@@ -1059,54 +1120,50 @@ public class BAPBridge {
                 appConnectorNavi.updateDestinationInfo(destInfo);
             }
 
-            /* 10. c_render: CMD_MANEUVER only when icon actually changes,
-             * CMD_BARGRAPH for distance updates, CMD_PERSPECTIVE for approach zone */
-            boolean rendererApproach = nowApproach
-                && showManeuver
-                && hasManeuverList
-                && !explicitClear
-                && !shouldClearManeuver;
-
-            /* Hide whenever there is no actual maneuver in the approach zone.
-             * This also clears the display for route-end/invalid-list updates,
-             * instead of leaving the previous arrow latched on the cluster. */
-            if (customRendererStarted && !rendererApproach) {
-                hideCustomRendererForCruise();
-            }
-
-            if (!customRendererPrepared && !customRendererStarted && rendererApproach) {
-                startCustomRenderer();
-            }
-
-            if (customRendererPrepared && !customRendererStarted && rendererApproach) {
-                activatePreparedCustomRenderer(s, bargraphDenominatorM);
-            }
-
-            if (rendererClient != null && customRendererStarted) {
-                /* (Old isConnected-based watchdog removed — the new
-                 * everConnected gate + 3-consecutive-fail respawn in
-                 * noteRendererSendResult handles all death cases without
-                 * false positives during the startup window when renderer
-                 * is still connecting.) */
-
-                /* A started renderer is always inside the approach zone. */
-                if (approachChanged && nowApproach) {
-                    updateRendererBargraph(s, bargraphDenominatorM);
+            /* 10. c_render: variant-specific visibility policy. */
+            if (customRendererStarted && !rendererShouldBeVisible) {
+                if (WINDOW_POLICY == WINDOW_POLICY_SOFT_HIDE) {
+                    softHideCustomRendererForCruise();
+                } else {
+                    hideCustomRendererForCruise();
                 }
-                /* Check if rendered maneuver actually changed */
-                boolean iconChanged = false;
-                int crIconMask = RouteGuidance.State.DIRTY_MANEUVER_ICON
-                    | RouteGuidance.State.DIRTY_MANEUVER_LIST
-                    | RouteGuidance.State.DIRTY_MANEUVER_COUNT;
-                if ((dirty & crIconMask) != 0) {
-                    if (nowApproach) {
+            }
+
+            if (rendererShouldBeVisible && rendererHasValidState
+                    && !customRendererPrepared && !customRendererStarted) {
+                startCustomRendererAsync();
+            }
+
+            if (rendererShouldBeVisible && rendererHasValidState
+                    && !customRendererStarted) {
+                awaitRendererPreparation(CR_READY_TIMEOUT_MS + 500);
+                if (customRendererPrepared && !customRendererStarted) {
+                    activatePreparedCustomRenderer(s, bargraphDenominatorM, rendererFollowStreet);
+                }
+            }
+
+            if (rendererClient != null && customRendererStarted
+                    && rendererShouldBeVisible && rendererHasValidState) {
+                if (customRendererSoftHidden) {
+                    resumeSoftHiddenCustomRenderer(s, bargraphDenominatorM, rendererFollowStreet);
+                } else if (rendererFollowStreet) {
+                    sendRendererFollowStreet();
+                    noteRendererSendResult(rendererClient.sendBargraph(0, 0));
+                } else {
+                    if (approachChanged && nowApproach) {
+                        updateRendererBargraph(s, bargraphDenominatorM);
+                    }
+                    boolean iconChanged = false;
+                    int crIconMask = RouteGuidance.State.DIRTY_MANEUVER_ICON
+                        | RouteGuidance.State.DIRTY_MANEUVER_LIST
+                        | RouteGuidance.State.DIRTY_MANEUVER_COUNT;
+                    if ((dirty & crIconMask) != 0 || lastCrIcon == RendererMapper.ICON_APPROACH) {
                         iconChanged = updateRendererIfChanged(s, bargraphDenominatorM);
                     }
-                }
-                /* Distance-only → CMD_BARGRAPH (no push), only in approach zone */
-                if (!iconChanged && !approachChanged && inApproachZone
-                        && (dirty & RouteGuidance.State.DIRTY_DIST_MAN) != 0) {
-                    updateRendererBargraph(s, bargraphDenominatorM);
+                    if (!iconChanged && !approachChanged && inApproachZone
+                            && (dirty & RouteGuidance.State.DIRTY_DIST_MAN) != 0) {
+                        updateRendererBargraph(s, bargraphDenominatorM);
+                    }
                 }
             }
 
@@ -1642,6 +1699,7 @@ public class BAPBridge {
 
     private boolean customRendererPrepared = false;
     private boolean customRendererStarted = false;
+    private boolean rendererPrepareThreadRunning = false;
 
     /* Last maneuver state sent to renderer — only send CMD_MANEUVER when these change.
      * lastCrVer tracks the slot version so a new maneuver with identical type/angle
@@ -1719,6 +1777,39 @@ public class BAPBridge {
         stopThread.start();
     }
 
+    private synchronized void startCustomRendererAsync() {
+        if (customRendererPrepared || customRendererStarted || rendererPrepareThreadRunning) return;
+        rendererPrepareThreadRunning = true;
+        Thread t = new Thread(new Runnable() {
+            public void run() {
+                try {
+                    startCustomRenderer();
+                } finally {
+                    synchronized (BAPBridge.this) {
+                        rendererPrepareThreadRunning = false;
+                        BAPBridge.this.notifyAll();
+                    }
+                }
+            }
+        }, "CRPrepare");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    private synchronized void awaitRendererPreparation(long timeoutMs) {
+        long deadline = System.currentTimeMillis() + timeoutMs;
+        while (rendererPrepareThreadRunning
+                && !customRendererPrepared && !customRendererStarted) {
+            long left = deadline - System.currentTimeMillis();
+            if (left <= 0) break;
+            try { wait(left); }
+            catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+    }
+
     private synchronized void startCustomRenderer() {
         if (customRendererPrepared || customRendererStarted) {
             Log.d(TAG, "CR: already prepared/started, skipping");
@@ -1772,6 +1863,7 @@ public class BAPBridge {
 
             customRendererPrepared = true;
             customRendererStarted = false;
+            customRendererSoftHidden = false;
             lastCrIcon = -1;
             lastCrDirection = -99;
             lastCrExitAngle = -9999;
@@ -1784,16 +1876,19 @@ public class BAPBridge {
     }
 
     private synchronized boolean activatePreparedCustomRenderer(
-            RouteGuidance.State s, int bargraphDenominatorM) {
+            RouteGuidance.State s, int bargraphDenominatorM, boolean followStreet) {
         if (!customRendererPrepared || customRendererStarted
                 || rendererClient == null || csRef == null) {
             return false;
         }
 
-        /* The first real maneuver is preloaded at alpha=0.  The renderer
-         * acknowledges a defined transparent frame before the LVDS path is
-         * exposed, so no synthetic FOLLOW_STREET frame is needed. */
-        if (!updateRendererIfChanged(s, bargraphDenominatorM)) {
+        /* Preload exactly what will be exposed after the context switch.
+         * A far first maneuver (and R4.3 cruise state) uses ICON_APPROACH;
+         * approach-zone activation uses the real maneuver. */
+        boolean preloaded = followStreet
+            ? preloadRendererFollowStreet()
+            : updateRendererIfChanged(s, bargraphDenominatorM);
+        if (!preloaded) {
             return false;
         }
         if (!rendererClient.waitForFrameReady(CR_FRAME_READY_TIMEOUT_MS)) {
@@ -1823,8 +1918,47 @@ public class BAPBridge {
 
         customRendererPrepared = false;
         customRendererStarted = true;
-        Log.i(TAG, "CR: started with real maneuver");
+        customRendererSoftHidden = false;
+        Log.i(TAG, "CR: started with " + (followStreet ? "FOLLOW_STREET" : "real maneuver"));
         return true;
+    }
+
+    private synchronized void softHideCustomRendererForCruise() {
+        if (!customRendererStarted || customRendererSoftHidden) return;
+        try {
+            if (rendererClient != null) {
+                noteRendererSendResult(rendererClient.sendBargraph(0, 0));
+                if (!rendererClient.sendHideDisplay()) {
+                    Log.w(TAG, "CR: soft hide-display send failed");
+                }
+            }
+            customRendererSoftHidden = true;
+            lastCrIcon = -1;
+            lastCrDirection = -99;
+            lastCrExitAngle = -9999;
+            lastCrDrivingSide = -1;
+            lastCrVer = -1;
+            Log.i(TAG, "CR: soft-hidden outside approach zone; context 74 retained");
+        } catch (Throwable t) {
+            Log.w(TAG, "CR soft hide failed: " + t.getMessage());
+        }
+    }
+
+    private synchronized void resumeSoftHiddenCustomRenderer(
+            RouteGuidance.State s, int bargraphDenominatorM, boolean followStreet) {
+        if (!customRendererStarted || !customRendererSoftHidden || rendererClient == null) return;
+        boolean sent = followStreet
+            ? sendRendererFollowStreet()
+            : updateRendererIfChanged(s, bargraphDenominatorM);
+        if (!sent) return;
+        if (!rendererClient.sendStartAnimation()) {
+            noteRendererSendResult(false);
+            Log.w(TAG, "CR: resume animation send failed");
+            return;
+        }
+        noteRendererSendResult(true);
+        customRendererSoftHidden = false;
+        Log.i(TAG, "CR: resumed from soft hide");
     }
 
     private synchronized void hideCustomRendererForCruise() {
@@ -1839,6 +1973,7 @@ public class BAPBridge {
             forceGfxAvailable(false);
             customRendererStarted = false;
             customRendererPrepared = true;
+            customRendererSoftHidden = false;
             lastCrIcon = -1;
             lastCrDirection = -99;
             lastCrExitAngle = -9999;
@@ -1855,6 +1990,7 @@ public class BAPBridge {
         Log.w(TAG, "CR: " + reason + "; renderer disabled for this route");
         customRendererPrepared = false;
         customRendererStarted = false;
+        customRendererSoftHidden = false;
         lastCrIcon = -1;
         lastCrDirection = -99;
         lastCrExitAngle = -9999;
@@ -1990,6 +2126,7 @@ public class BAPBridge {
         forceClusterRouteInfoState(false);
         customRendererPrepared = false;
         customRendererStarted = false;
+        customRendererSoftHidden = false;
         lastCrIcon = -1;
         lastCrDirection = -99;
         lastCrExitAngle = -9999;
@@ -2105,13 +2242,36 @@ public class BAPBridge {
     }
 
     /**
-     * Send ICON_APPROACH to c_render — mirrors BAP sendFollowStreet().
-     * Shown when maneuver exists but car is outside approach zone.
+     * Preload ICON_APPROACH while the renderer surface is still transparent.
      */
-    private void sendRendererFollowStreet() {
-        if (rendererClient == null || !customRendererStarted) return;
+    private boolean preloadRendererFollowStreet() {
+        if (rendererClient == null || !customRendererPrepared || customRendererStarted) return false;
+        try {
+            boolean ok = rendererClient.sendPreloadManeuver(
+                RendererMapper.ICON_APPROACH, 0, 0, 0, null, 0, 0, 1);
+            noteRendererSendResult(ok);
+            if (ok) {
+                lastCrIcon = RendererMapper.ICON_APPROACH;
+                lastCrDirection = 0;
+                lastCrExitAngle = 0;
+                lastCrDrivingSide = 0;
+                lastCrVer = -1;
+            }
+            return ok;
+        } catch (Throwable t) {
+            Log.w(TAG, "CR follow-street preload failed: " + t.getMessage());
+            noteRendererSendResult(false);
+            return false;
+        }
+    }
+
+    /**
+     * Send ICON_APPROACH to c_render — mirrors BAP sendFollowStreet().
+     */
+    private boolean sendRendererFollowStreet() {
+        if (rendererClient == null || !customRendererStarted) return false;
         int icon = RendererMapper.ICON_APPROACH;
-        if (icon == lastCrIcon) return;  /* already showing follow street */
+        if (icon == lastCrIcon && !customRendererSoftHidden) return false;
         try {
             boolean ok = rendererClient.sendManeuver(icon, 0, 0, 0, null, 0, 0, 1);
             noteRendererSendResult(ok);
@@ -2122,13 +2282,16 @@ public class BAPBridge {
                 lastCrDrivingSide = 0;
                 lastCrVer = -1;
             }
+            return ok;
         } catch (Throwable t) {
             Log.w(TAG, "CR follow street failed: " + t.getMessage());
             noteRendererSendResult(false);
+            return false;
         }
     }
 
     /**
+     * Send standalone CMD_BARGRAPH to c_render on distance-only updates.    /**
      * Send standalone CMD_BARGRAPH to c_render on distance-only updates.
      * No push transition — just updates the bargraph level/mode in place.
      */

@@ -42,6 +42,11 @@ public class RouteGuidance implements CarplayBus.Listener {
     private boolean rgActive = false;
     private boolean hasRouteUpdate = false;
 
+    /* R4_SOFT_INACTIVE: r4.2.2 */
+    private static final long SOFT_INACTIVE_GRACE_MS = 5000;
+    private boolean softInactivePending = false;
+    private int softInactiveGeneration = 0;
+
     /* Parsed state (reused to avoid allocations) */
     private State state = new State();
 
@@ -256,6 +261,7 @@ public class RouteGuidance implements CarplayBus.Listener {
     public void start() {
         if (running) return;
         running = true;
+        cancelSoftInactive("start");
         rgActive = false;
         hasRouteUpdate = false;
 
@@ -272,6 +278,7 @@ public class RouteGuidance implements CarplayBus.Listener {
     public void stop() {
         if (!running) return;
         running = false;
+        cancelSoftInactive("stop");
         rgActive = false;
         hasRouteUpdate = false;
 
@@ -292,7 +299,7 @@ public class RouteGuidance implements CarplayBus.Listener {
      * CarplayBus Listener
      * ============================================================ */
 
-    public void onFrame(int type, int flags, byte[] payload, int len) {
+    public synchronized void onFrame(int type, int flags, byte[] payload, int len) {
         if (!running) return;
         if (type != CarplayBus.EVT_RGD_UPDATE) return;
         CarplayBus.Data d = CarplayBus.parseText(payload, len);
@@ -305,22 +312,19 @@ public class RouteGuidance implements CarplayBus.Listener {
             return;
         }
 
-        /* Check for disconnect */
+        /* Check for an actual transport/session disconnect. */
         if (state.disconnectReason != null) {
-            if (bap != null) { bap.onStop(); bap.onShutdown(); }
-            rgActive = false;
+            deactivateNow("disconnect: " + state.disconnectReason);
             hasRouteUpdate = false;
             state.reset();
             return;
         }
 
         /*
-         * Start/stop gating:
-         * - Prefer explicit active authority from visible_in_app (native-like TBT_Active semantics).
-         * - Fall back to route/maneuver heuristics only when visible_in_app is unknown.
-         * - iOS can emit metadata-only bus updates (component_ids/current_road/etc) even when not navigating.
-         *
-         * Only change RG active state when we received an activation-relevant delta.
+         * Start/stop gating with a 5-second soft-inactive window.
+         * Hard stop: route_state=0, source_supports_rg=0, disconnect.
+         * Soft stop: visible_in_app=0 while a route still exists, or
+         * route_state=1 with an empty maneuver list.
          */
         int actMask = State.DIRTY_ROUTE_STATE
             | State.DIRTY_MANEUVER_STATE
@@ -332,51 +336,41 @@ public class RouteGuidance implements CarplayBus.Listener {
         boolean hasActivationDelta = (state.dirtyMask & actMask) != 0;
 
         if (hasActivationDelta) {
-            boolean explicitClear = ((state.dirtyMask & State.DIRTY_MANEUVER_COUNT) != 0)
-                && (state.maneuverCount == 0);
+            boolean hardInactive = state.routeState == ROUTE_STATE_NO_ROUTE_SET
+                || state.sourceSupportsRg == 0;
+            boolean softInactive = !hardInactive
+                && ((state.visibleInApp == 0 && state.routeState > ROUTE_STATE_NO_ROUTE_SET)
+                    || (state.routeState == ROUTE_STATE_ROUTE_SET
+                        && state.maneuverCount == 0));
 
-            /*
-             * visible_in_app is mapped from iAP2 route update and is the closest
-             * equivalent to native TBT_Active ownership.
-             *   - 1 => active
-             *   - 0 => inactive
-             *   - -1 => unknown (fallback to heuristics)
-             */
-            boolean hasActiveAuthority = (state.visibleInApp >= 0);
+            boolean hasActiveAuthority = state.visibleInApp >= 0;
             boolean wantActive;
             if (hasActiveAuthority) {
-                wantActive = (state.visibleInApp != 0);
+                wantActive = state.visibleInApp != 0;
             } else {
-                wantActive = (state.routeState >= ROUTE_STATE_ROUTE_SET)
-                    || (state.maneuverCount > 0)
+                wantActive = state.routeState >= ROUTE_STATE_ROUTE_SET
+                    || state.maneuverCount > 0
                     || (state.maneuverOrder != null && state.maneuverOrder.length > 0);
-                if (explicitClear && state.routeState < ROUTE_STATE_ROUTE_SET) {
-                    wantActive = false;
-                }
             }
-            if (state.sourceSupportsRg == 0) wantActive = false;
+            if (hardInactive || softInactive) wantActive = false;
 
-            /* route_state=0 (NO_ROUTE_SET) is authoritative -- no route means
-             * nothing to show, regardless of stale visible_in_app from C hook. */
-            if (state.routeState == ROUTE_STATE_NO_ROUTE_SET) wantActive = false;
-
-            if (wantActive && !rgActive) {
-                Log.i(TAG, "RG activate: route_state=" + state.routeState
-                    + " maneuver_count=" + state.maneuverCount
-                    + " visible_in_app=" + state.visibleInApp
+            if (hardInactive) {
+                deactivateNow("hard inactive route_state=" + state.routeState
                     + " source_supports_rg=" + state.sourceSupportsRg);
-                if (bap != null) bap.onStart();
-                rgActive = true;
-            } else if (!wantActive && rgActive) {
-                Log.i(TAG, "RG deactivate: route_state=" + state.routeState
+            } else if (softInactive && rgActive) {
+                scheduleSoftInactive("route_state=" + state.routeState
                     + " maneuver_count=" + state.maneuverCount
-                    + " visible_in_app=" + state.visibleInApp
-                    + " source_supports_rg=" + state.sourceSupportsRg);
-                /* With C hook debounce, transient route_state=0 never reaches
-                 * Java — any deactivation here is genuine (source_supports_rg=0,
-                 * visibleInApp=0, or real route end).  Full shutdown. */
-                if (bap != null) { bap.onStop(); bap.onShutdown(); }
-                rgActive = false;
+                    + " visible_in_app=" + state.visibleInApp);
+            } else if (wantActive) {
+                cancelSoftInactive("active update");
+                if (!rgActive) {
+                    Log.i(TAG, "RG activate: route_state=" + state.routeState
+                        + " maneuver_count=" + state.maneuverCount
+                        + " visible_in_app=" + state.visibleInApp
+                        + " source_supports_rg=" + state.sourceSupportsRg);
+                    if (bap != null) bap.onStart();
+                    rgActive = true;
+                }
             }
         }
 
@@ -390,6 +384,65 @@ public class RouteGuidance implements CarplayBus.Listener {
             bap.update(state);
             state.clearDirty();
         }
+    }
+
+    private synchronized void cancelSoftInactive(String reason) {
+        if (softInactivePending) {
+            Log.d(TAG, "Soft inactive cancelled: " + reason);
+        }
+        softInactivePending = false;
+        ++softInactiveGeneration;
+    }
+
+    private synchronized void scheduleSoftInactive(final String reason) {
+        if (softInactivePending) return;
+        softInactivePending = true;
+        final int generation = ++softInactiveGeneration;
+        Log.i(TAG, "Soft inactive armed for 5000ms: " + reason);
+        Thread t = new Thread(new Runnable() {
+            public void run() {
+                try { Thread.sleep(SOFT_INACTIVE_GRACE_MS); }
+                catch (InterruptedException e) { return; }
+                synchronized (RouteGuidance.this) {
+                    if (!softInactivePending || generation != softInactiveGeneration || !rgActive) return;
+                    boolean stillSoft = state.routeState != ROUTE_STATE_NO_ROUTE_SET
+                        && state.sourceSupportsRg != 0
+                        && ((state.visibleInApp == 0)
+                            || (state.routeState == ROUTE_STATE_ROUTE_SET
+                                && state.maneuverCount == 0));
+                    if (!stillSoft) {
+                        cancelSoftInactive("state recovered before timeout");
+                        return;
+                    }
+                    softInactivePending = false;
+                    Log.i(TAG, "Soft inactive timeout: " + reason);
+                    if (bap != null) { bap.onStop(); bap.onShutdown(); }
+                    rgActive = false;
+                }
+            }
+        }, "RGSoftInactive");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    private synchronized void deactivateNow(String reason) {
+        cancelSoftInactive(reason);
+        if (!rgActive) return;
+        Log.i(TAG, "RG deactivate now: " + reason);
+        if (bap != null) { bap.onStop(); bap.onShutdown(); }
+        rgActive = false;
+    }
+
+    private static String normalizeDestination(String value) {
+        if (value == null) return null;
+        String v = value.trim();
+        if (v.length() == 0) return null;
+        if ("未知位置".equals(v)
+                || "Unknown Location".equalsIgnoreCase(v)
+                || "Unknown destination".equalsIgnoreCase(v)) {
+            return null;
+        }
+        return v;
     }
 
     /* ============================================================
@@ -635,8 +688,10 @@ public class RouteGuidance implements CarplayBus.Listener {
             }
         }
         if (d.has("destination")) {
-            String v = d.str("destination");
-            if (!strEq(state.destination, v)) {
+            String v = normalizeDestination(d.str("destination"));
+            /* Invalid placeholders never clear or overwrite the last valid
+             * destination shown on the cluster. */
+            if (v != null && !strEq(state.destination, v)) {
                 state.destination = v;
                 state.markDirty(State.DIRTY_DESTINATION);
             }

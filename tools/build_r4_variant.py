@@ -173,7 +173,10 @@ def patch_class_utf8(data: bytes, new_build_id: str) -> bytes:
                 text = raw.decode("utf-8")
             except UnicodeDecodeError:
                 text = ""
-            if text.startswith("2026-") and ("r4" in text.lower() or "R4" in text):
+            if text.startswith("Build: 2026-") and "r4" in text.lower():
+                raw = ("Build: " + new_build_id).encode("utf-8")
+                changed = True
+            elif text.startswith("2026-") and "r4" in text.lower():
                 raw = new_build_id.encode("utf-8")
                 changed = True
             out += struct.pack(">H", len(raw)) + raw
@@ -229,7 +232,7 @@ def main() -> None:
         ROOT / "java_patch/com/luka/carplay/routeguidance/BAPBridge.java",
         ROOT / "java_patch/com/luka/carplay/routeguidance/RouteGuidance.java",
     ]
-    cp = str(base_jar) + os.pathsep + str(stub_cls)
+    cp = str(stub_cls) + os.pathsep + str(base_jar)
     run([javac, "-encoding", "UTF-8", "-source", "1.2", "-target", "1.2",
          "-cp", cp, "-sourcepath", str(work / "empty-sourcepath"),
          "-d", str(out_cls)] + [str(p) for p in sources])
@@ -270,7 +273,9 @@ def main() -> None:
     with zipfile.ZipFile(out_jar, "r") as z:
         hook = z.read("com/luka/carplay/CarPlayHook.class")
         if build_id.encode("utf-8") not in hook:
-            raise RuntimeError("Build ID verification failed")
+            raise RuntimeError("Build ID constant verification failed")
+        if ("Build: " + build_id).encode("utf-8") not in hook:
+            raise RuntimeError("Build ID log-string verification failed")
         for required in (
             "com/luka/carplay/routeguidance/BAPBridge.class",
             "com/luka/carplay/routeguidance/RouteGuidance.class",
