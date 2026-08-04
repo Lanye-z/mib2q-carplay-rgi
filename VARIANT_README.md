@@ -39,7 +39,7 @@ After the first primary maneuver, hide the renderer and return to context 72 out
 ## Output / 输出
 
 - `dist/r4.2.2/carplay_hook.jar`
-- GitHub Actions artifact: `r4.2.2-carplay-hook`
+- GitHub Actions artifact: `r4.2.2-final`
 
 The C hook and renderer binary are unchanged from R4.1. Deploy this JAR with the matching R4.1 `maneuver_render`, `libcarplay_hook.so`, and `flag_atlas.rgba`.
 
