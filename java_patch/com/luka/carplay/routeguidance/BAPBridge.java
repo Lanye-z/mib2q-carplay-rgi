@@ -752,15 +752,14 @@ public class BAPBridge {
             int type0 = (firstIdx >= 0 && s.mType != null && firstIdx < s.mType.length) ? s.mType[firstIdx] : -1;
             boolean showManeuver = ManeuverMapper.isValidType(type0);
 
-            /* Highway-aware prepare thresholds (meters).
+            /* Route-step based prepare thresholds (meters).
              *
              * iOS sends `step.distance` (= s.mDistance[idx]) — the length of
              * the route segment between the previous maneuver and this one.
-             * Long step (>1.5 km) = highway/limited-access road; short step
-             * = city.  This catches `MT_KEEP_RIGHT` / `MT_LEFT_TURN` on
-             * highways which the type-based check would miss.
-             * Fallback: when step length unknown (route setup), fall back
-             * to the maneuver-type heuristic. */
+             * A step longer than 2 km uses the 1000 m prepare threshold;
+             * shorter steps use the 350 m threshold.
+             * Fallback: when step length is unknown, use the explicit
+             * highway/ramp maneuver-type heuristic. */
             int rawStepM = (firstIdx >= 0 && s.mDistance != null
                     && firstIdx < s.mDistance.length) ? s.mDistance[firstIdx] : -1;
             boolean isHighway;
