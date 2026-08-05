@@ -35,7 +35,6 @@ Keep context 74 and the renderer visible for the whole active route; show ICON_A
 ## Output / 输出
 
 - `dist/r4.3/carplay_hook.jar`
-- GitHub Actions artifact: `r4.3-final`
 
 The C hook and renderer binary are unchanged from R4.1. Deploy this JAR with the matching R4.1 `maneuver_render`, `libcarplay_hook.so`, and `flag_atlas.rgba`.
 
