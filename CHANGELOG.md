@@ -1,6 +1,7 @@
 # Changelog / 更新日志
 
 ## R4.3 Always On (2026-08-05)
+- R4.3 native-navigation handoff: finish renderer/KOMO/Context cleanup before releasing the native BAP gate, with no post-release GFX reset.
 
 Build ID: `2026-08-05-r4.3-always-on`
 

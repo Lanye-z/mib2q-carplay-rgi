@@ -1,7 +1,7 @@
 # R4.3 Always On
 
 Branch: `r4.3-always-on`  
-Build ID: `2026-08-05-r4.3-always-on`  
+Build ID: `2026-08-05-r4.3-always-on-handoff-fix`  
 Base: R4.1 (`main` at branch creation)
 
 > Vehicle-test candidate. Back up the original files before deployment.
@@ -14,6 +14,8 @@ Base: R4.1 (`main` at branch creation)
 - The first valid primary maneuver is shown immediately: `ICON_APPROACH` while far, real maneuver inside the threshold.
 - Renderer preparation overlaps the BAP descriptor/distance/ExitView work.
 - Retains the safe conditional context bounce: when already on context 74, switch `74 → 72 → 74`; otherwise perform a real transition into 74.
+- Native-navigation handoff fix: complete CarPlay renderer/KOMO/Context cleanup before releasing the native route-guidance gate; no GFX or route-info writes occur after release.
+- 原车导航接管修复：先完成 CarPlay renderer、KOMO 与 Context 清理，最后释放原车导航 gate；释放后不再写入 GFX 或 route-info 状态。
 - `RouteGuidance.java` lifecycle, activation gating, disconnect handling, and destination handling are restored exactly to R4.1.
 - `RouteGuidance.java` 的生命周期、激活判断、断开处理及目的地处理已完整恢复为 R4.1 原版。
 - Straight-arrow mapping remains unchanged from R4.1.

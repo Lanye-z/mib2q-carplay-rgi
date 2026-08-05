@@ -712,9 +712,12 @@ public class BAPBridge {
                 catch (Throwable t) { Log.w(TAG, "renderer dispose failed: " + t.getMessage()); }
                 rendererClient = null;
             }
+            /* stopCustomRenderer() has already completed all CarPlay-side
+             * renderer, context, route-info and KOMO/GFX cleanup. Release the
+             * native route-guidance gate only after that cleanup, and do not
+             * write route-info or GFX state again afterwards: native navigation
+             * may begin its handoff immediately when the gate opens. */
             releaseNativeRouteGuidanceGate("session shutdown");
-            forceClusterRouteInfoState(false);
-            forceGfxAvailable(false);
             Log.i(TAG, "Shutdown (full teardown)");
         }
     }

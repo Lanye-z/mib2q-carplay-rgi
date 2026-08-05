@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 VARIANTS = {
     "r4.2.1": "2026-08-05-r4.2.1-soft-hide",
     "r4.2.2": "2026-08-05-r4.2.2-context72",
-    "r4.3": "2026-08-05-r4.3-always-on",
+    "r4.3": "2026-08-05-r4.3-always-on-handoff-fix",
 }
 
 STUBS = {
