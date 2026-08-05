@@ -6,7 +6,7 @@ Build ID: `2026-08-05-r4.3-always-on`
 
 - 350 m normal threshold; 1000 m threshold when route step exceeds 2 km.
 - First primary maneuver displays ICON_APPROACH while far.
-- 5-second soft-inactive handling and invalid-destination filtering.
+- RouteGuidance lifecycle and destination handling restored exactly to R4.1.
 - Keep context 74 and the renderer visible for the whole active route; show ICON_APPROACH outside the approach zone.
 - 有效导航期间持续占用 Context 74；接近区外显示 ICON_APPROACH 直行线头。
 
