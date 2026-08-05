@@ -14,9 +14,8 @@ Base: R4.1 (`main` at branch creation)
 - The first valid primary maneuver is shown immediately: `ICON_APPROACH` while far, real maneuver inside the threshold.
 - Renderer preparation overlaps the BAP descriptor/distance/ExitView work.
 - Retains the safe conditional context bounce: when already on context 74, switch `74 → 72 → 74`; otherwise perform a real transition into 74.
-- `visible_in_app=0` or `route_state=1 + maneuver_count=0` uses a 5-second soft-inactive grace period.
-- `route_state=0`, `source_supports_rg=0`, disconnect, or grace timeout performs full teardown and releases the stock-navigation BAP gate.
-- Invalid destinations (`未知位置`, `Unknown Location`, `Unknown destination`, blank text) do not overwrite the last valid destination.
+- `RouteGuidance.java` lifecycle, activation gating, disconnect handling, and destination handling are restored exactly to R4.1.
+- `RouteGuidance.java` 的生命周期、激活判断、断开处理及目的地处理已完整恢复为 R4.1 原版。
 - Straight-arrow mapping remains unchanged from R4.1.
 
 - 普通/城市路段在 **350 m** 内显示真实转向。
@@ -25,9 +24,6 @@ Base: R4.1 (`main` at branch creation)
 - 本次导航的首个有效主 maneuver 立即显示：距离较远显示 `ICON_APPROACH`，进入阈值后显示真实箭头。
 - renderer 准备过程与 BAP 描述符、距离及 ExitView 发送重叠执行。
 - 保留安全的条件式 Context bounce：当前已是 74 时执行 `74 → 72 → 74`，其他情况下保证真实切入 74。
-- `visible_in_app=0` 或 `route_state=1 且 maneuver_count=0` 进入 5 秒软失效。
-- `route_state=0`、`source_supports_rg=0`、真实断开或软失效超时执行完整清理并释放原车导航 gate。
-- 无效目的地文字不覆盖最近一次有效目的地。
 - 直行箭头映射保持 R4.1 原样。
 
 ## Variant behavior / 本版本窗口策略
