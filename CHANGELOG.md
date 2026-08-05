@@ -6,7 +6,7 @@ Build ID: `2026-08-05-r4.2.1-soft-hide`
 
 - 350 m normal threshold; 1000 m threshold when route step exceeds 2 km.
 - First primary maneuver displays ICON_APPROACH while far.
-- 5-second soft-inactive handling and invalid-destination filtering.
+- RouteGuidance lifecycle and destination handling restored exactly to R4.1.
 - After the first primary maneuver, leave context 74 active and hide only the renderer surface outside the approach zone.
 - 首个主 maneuver 结束后，接近区外保持 Context 74，仅软隐藏 renderer 画面。
 
