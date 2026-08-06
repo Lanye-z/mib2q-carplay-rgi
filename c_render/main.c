@@ -4,7 +4,7 @@
  * Command-driven rendering engine with TCP server.
  * Receives maneuver commands, handles all animation/transitions internally.
  *
- * macOS: GLFW window for development.
+ * macOS/Windows: GLFW window for development.
  * QNX:   take over native displayable 20 (DISPLAYABLE_MAP_ROUTE_GUIDANCE,
  *        the slot KOMO RG widget normally uses) by registering our own
  *        screen window with ID="20".  setActiveDisplayable(4, 20) (called
@@ -83,9 +83,15 @@ typedef struct {
 
 static cr_engine_t g_engine;
 
-/* Fade-in on cold start */
-static float g_fade_alpha = 1.0f;
+/* Fade-in on cold start.  Keep the surface transparent until a real
+ * maneuver has been preloaded.  A zero-initialized maneuver has icon 0
+ * (ICON_APPROACH), so starting at alpha=1 leaks a straight arrow whenever
+ * context 74 is already active before Java deliberately exposes us. */
+static float g_fade_alpha = 0.0f;
 static int   g_fade_active = 0;
+static int   g_preload_pending = 0;
+static int   g_frame_ready_pending = 0;
+static int   g_display_active = 0;
 #define FADE_SPEED 0.04f  /* per-frame step (~0.8s at 30fps) */
 
 /* Bargraph overlay */
@@ -158,6 +164,53 @@ static void engine_apply_maneuver(const maneuver_state_t *state) {
     render_invalidate_masks();
     g_engine.dirty = 1;
     fprintf(stderr, "engine: new maneuver icon=%d\n", state->icon);
+}
+
+/* Replace the current state without exposing or animating it yet. */
+static void engine_preload_maneuver(const maneuver_state_t *state) {
+    g_engine.current = *state;
+    g_engine.has_current = 1;
+    g_engine.has_next = 0;
+    g_engine.has_pending = 0;
+    g_engine.phase = ENGINE_IDLE;
+    maneuver_set_slide(0.0f);
+    render_invalidate_masks();
+    g_engine.dirty = 1;
+
+    g_fade_alpha = 0.0f;
+    g_fade_active = 0;
+    render_set_global_alpha(0.0f);
+    g_preload_pending = 1;
+    g_frame_ready_pending = 1;
+    fprintf(stderr, "engine: preloaded icon=%d\n", state->icon);
+}
+
+static void engine_start_preloaded_animation(void) {
+    if (!g_preload_pending || !g_engine.has_current) {
+        fprintf(stderr, "engine: start animation ignored (no preload)\n");
+        return;
+    }
+
+    g_preload_pending = 0;
+    g_display_active = 1;
+    g_engine.phase = ENGINE_SLIDING_IN;
+    maneuver_start_anim();
+    render_invalidate_masks();
+    g_engine.dirty = 1;
+    g_fade_alpha = 0.0f;
+    g_fade_active = 1;
+    render_set_global_alpha(0.0f);
+
+    if (g_persp_deferred) {
+        render_set_perspective(g_persp_deferred_value);
+        g_persp_deferred = 0;
+    }
+    if (g_bargraph_deferred) {
+        g_bargraph_level = g_bargraph_deferred_level;
+        g_bargraph_on = g_bargraph_deferred_mode;
+        g_bargraph_deferred = 0;
+    }
+    fprintf(stderr, "engine: started preloaded icon=%d\n", g_engine.current.icon);
 }
 
 /* Advance engine state machine */
@@ -339,6 +392,7 @@ int main(int argc, char **argv) {
     /* Engine starts with no current maneuver */
     memset(&g_engine, 0, sizeof(g_engine));
     g_engine.phase = ENGINE_IDLE;
+    render_set_global_alpha(0.0f);
 
     fprintf(stderr, "c_render: ready, waiting for commands on :%d\n", CR_TCP_PORT);
     cr_server_mark_ready();
@@ -390,7 +444,7 @@ int main(int argc, char **argv) {
 
         /* Drain all pending commands, keep only the last CMD_MANEUVER */
         cr_cmd_t cmd;
-        int got_maneuver = 0;
+        int got_maneuver = 0; /* 1=normal transition, 2=transparent preload */
         maneuver_state_t pending_maneuver;
         uint8_t pending_flags = 0;
         uint8_t pending_perspective = 1;
@@ -411,8 +465,27 @@ int main(int argc, char **argv) {
                 pending_bargraph_level = cmd.payload[44];
                 pending_bargraph_mode = cmd.payload[45];
                 got_maneuver = 1;
+                platform_set_preview_visible(1);
                 break;
             }
+            case CMD_PRELOAD_MANEUVER: {
+                decode_maneuver(&cmd, &pending_maneuver);
+                pending_flags = cmd.flags;
+                pending_perspective = cmd.payload[43];
+                pending_bargraph_level = cmd.payload[44];
+                pending_bargraph_mode = cmd.payload[45];
+                got_maneuver = 2;
+                break;
+            }
+            case CMD_START_ANIMATION:
+                platform_set_preview_visible(1);
+                engine_start_preloaded_animation();
+                break;
+            case CMD_HIDE_DISPLAY:
+                g_display_active = 0;
+                platform_set_preview_visible(0);
+                fprintf(stderr, "engine: display hidden\n");
+                break;
             case CMD_SCREENSHOT: {
                 got_screenshot = 1;
                 memcpy(screenshot_label, cmd.payload, 16);
@@ -470,20 +543,26 @@ int main(int argc, char **argv) {
 
         /* Apply the latest maneuver (draining to latest) */
         if (got_maneuver) {
-            if (pending_flags & MAN_FLAG_SET_PERSP) {
+            /* A preload is a complete display snapshot.  Always overwrite
+             * perspective/bargraph state so a later approach cannot inherit
+             * overlays from the maneuver that was hidden previously. */
+            if (got_maneuver == 2 || (pending_flags & MAN_FLAG_SET_PERSP)) {
                 g_persp_deferred = 1;
                 g_persp_deferred_value = pending_perspective ? 1 : 0;
                 fprintf(stderr, "engine: deferred perspective=%s\n",
                         g_persp_deferred_value ? "3D" : "2D");
             }
-            if (pending_flags & MAN_FLAG_BARGRAPH) {
+            if (got_maneuver == 2 || (pending_flags & MAN_FLAG_BARGRAPH)) {
                 g_bargraph_deferred = 1;
                 g_bargraph_deferred_level = pending_bargraph_level;
                 if (g_bargraph_deferred_level > 16) g_bargraph_deferred_level = 16;
                 g_bargraph_deferred_mode = pending_bargraph_mode;
                 if (g_bargraph_deferred_mode > 2) g_bargraph_deferred_mode = 1;
             }
-            engine_apply_maneuver(&pending_maneuver);
+            if (got_maneuver == 2)
+                engine_preload_maneuver(&pending_maneuver);
+            else
+                engine_apply_maneuver(&pending_maneuver);
         }
 
         /* Tick engine state machine */
@@ -550,14 +629,16 @@ int main(int argc, char **argv) {
 #endif
 
             maneuver_state_t *next_ptr = g_engine.has_next ? &g_engine.next : NULL;
-            maneuver_prepare_frame(&g_engine.current, next_ptr);
+            if (g_engine.has_current)
+                maneuver_prepare_frame(&g_engine.current, next_ptr);
 #ifdef CR_DIAG_FRAME_LOG
             struct timespec t_after_prep;
             clock_gettime(CLOCK_MONOTONIC, &t_after_prep);
 #endif
 
             render_begin_frame();
-            maneuver_draw(&g_engine.current, next_ptr);
+            if (g_engine.has_current)
+                maneuver_draw(&g_engine.current, next_ptr);
             if (g_bargraph_alpha > 0.0f) {
                 float ba = g_bargraph_alpha * g_fade_alpha;
                 int bl = g_bargraph_level;
@@ -579,10 +660,12 @@ int main(int argc, char **argv) {
             /* Frame-ready means the EGL surface has a defined maneuver frame
              * queued to the compositor.  The cold-start fade may still continue
              * visually after Java exposes the displayable. */
-            if (!announced_first_frame && g_engine.has_current) {
+            if (g_engine.has_current
+                    && (!announced_first_frame || g_frame_ready_pending)) {
                 announced_first_frame = 1;
+                g_frame_ready_pending = 0;
                 cr_server_mark_frame_ready();
-                fprintf(stderr, "engine: first frame ready\n");
+                fprintf(stderr, "engine: frame ready\n");
             }
 
             /* Voluntarily yield to the compositor right after queuing a
@@ -647,7 +730,8 @@ int main(int argc, char **argv) {
          * the detached thread perturbing a frame in flight. */
         {
             static struct timespec focus_last = {0, 0};
-            if (g_engine.phase == ENGINE_IDLE
+            if (g_display_active
+                    && g_engine.phase == ENGINE_IDLE
                     && !render_is_animating()
                     && timespec_elapsed_at_least(&t_start, &focus_last, 30, 0)) {
                 focus_last = t_start;

@@ -1,8 +1,14 @@
 .idea
 .claude
-/java_patch/out
-/java_test/out
+.tools/
+/build/
+/java_patch/out/
+/java_test/out/
+c_render/screenshot_*.ppm
 carplay_hook.jar
 libcarplay_hook.so
 mu1316_lsd.jar
 **/.DS_Store
+
+# The deterministic release JAR is intentionally tracked.
+!release/carplay_hook.jar

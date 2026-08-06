@@ -211,8 +211,8 @@ static GLint g_default_fbo = 0;  /* saved at init -- may not be 0 on macOS */
 static int g_route_mask_ready = 0;
 
 /* 2x supersample FBO — render at double resolution, blit down with GL_LINEAR */
-#ifdef PLATFORM_MACOS
-#define SSAA_SCALE 1  /* macOS Retina provides 2x framebuffer */
+#if defined(PLATFORM_MACOS) || defined(PLATFORM_WINDOWS)
+#define SSAA_SCALE 1  /* local desktop window already provides a 2x framebuffer */
 #else
 #define SSAA_SCALE 2  /* QNX: explicit 2x supersample */
 #endif

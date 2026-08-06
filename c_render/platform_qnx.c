@@ -539,17 +539,18 @@ void platform_release_displayable(void) {
     g_native_window = 0;
 }
 
-/* Display restore — re-declare context 74 with its original native
- * composition (MAP_ROUTE_GUIDANCE 20 + images 102/101 + KOMBI_MAP_VIEW 33)
- * and switch cluster back to it.
+/* Display restore - re-declare context 74 with its original native
+ * composition (MAP_ROUTE_GUIDANCE 20 + images 102/101 + KOMBI_MAP_VIEW 33),
+ * then leave the cluster on neutral context 72.
  *
  * After our screen window is destroyed, m_surfaceSources[20] is empty.
  * The slot stays empty until native nav next enters StartDrawing (when a
  * native route activates), at which point libPresentationController
  * creates its own ID="20" window via display_create_window.  The dmdt
- * commands here just keep the context layout consistent and force the
- * cluster compositor to pick the original definition immediately —
- * ready for a future native render to populate.
+ * Keeping an empty context 74 active is unsafe: the next native or CarPlay
+ * switch to 74 can be short-circuited, so setActiveDisplayable(4, 20) never
+ * binds the newly-created window.  Leaving 72 guarantees the next owner
+ * performs a real 72 -> 74 transition.
  *
  * Idempotent and signal-safe via system() — atexit hook calls this on
  * graceful exit.  Java also re-declares this native layout as a backstop
@@ -559,7 +560,7 @@ static void restore_display(void) {
         char cmd[128];
         snprintf(cmd, sizeof(cmd), "/eso/bin/apps/dmdt dc 74 20 102 101 33");
         system(cmd);
-        snprintf(cmd, sizeof(cmd), "/eso/bin/apps/dmdt sc %d 74", g_display_id);
+        snprintf(cmd, sizeof(cmd), "/eso/bin/apps/dmdt sc %d 72", g_display_id);
         system(cmd);
         g_display_routed = 0;
     }
@@ -913,7 +914,8 @@ void platform_shutdown(void) {
      *      resources can collide with native components).
      *   3. Explicitly destroy our screen_window via screen_destroy_window
      *      so displaymanager's m_surfaceSources[20] vacates promptly.
-     *   4. Restore context 74's stock composition via dmdt as a backstop. */
+     *   4. Restore context 74's stock composition and activate neutral
+     *      context 72 via dmdt as a backstop. */
     for (int i = 0; i < 100 && (g_focus_check_inflight || system_async_inflight_count() > 0); i++) {
         struct timespec wait_ts = { .tv_sec = 0, .tv_nsec = 10 * 1000 * 1000 };
         nanosleep(&wait_ts, NULL);

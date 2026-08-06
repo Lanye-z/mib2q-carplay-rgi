@@ -2,8 +2,8 @@
  * OpenGL compatibility header.
  *
  * Includes the correct GL headers for each platform and provides
- * compatibility shims so rendering code works on both OpenGL 2.1
- * (macOS) and GLES2 (QNX).
+ * compatibility shims so rendering code works on desktop OpenGL
+ * (macOS 2.1 / Windows 3.3 compatibility) and GLES2 (QNX).
  */
 
 #ifndef CR_GL_COMPAT_H
@@ -14,12 +14,16 @@
 #define GL_SILENCE_DEPRECATION
 #include <OpenGL/gl.h>
 
+#elif defined(PLATFORM_WINDOWS)
+
+#include <glad/gl.h>
+
 #elif defined(PLATFORM_QNX)
 
 #include <GLES2/gl2.h>
 
 #else
-#error "Define PLATFORM_MACOS or PLATFORM_QNX"
+#error "Define PLATFORM_MACOS, PLATFORM_WINDOWS or PLATFORM_QNX"
 #endif
 
 /*
@@ -28,7 +32,7 @@
  * which is close enough to GLES2 GLSL 1.00.
  * Main difference: no "precision" qualifiers in desktop GL.
  */
-#ifdef PLATFORM_MACOS
+#if defined(PLATFORM_MACOS) || defined(PLATFORM_WINDOWS)
 #define SHADER_HEADER ""
 #define SHADER_PRECISION ""
 #else
@@ -40,7 +44,7 @@
  * FBO compatibility -- core in GLES2, available via GL_EXT_framebuffer_object
  * on macOS OpenGL 2.1.
  */
-#ifdef PLATFORM_MACOS
+#if defined(PLATFORM_MACOS) || defined(PLATFORM_WINDOWS)
 #ifndef GL_FRAMEBUFFER
 #define GL_FRAMEBUFFER              GL_FRAMEBUFFER_EXT
 #define GL_COLOR_ATTACHMENT0        GL_COLOR_ATTACHMENT0_EXT
