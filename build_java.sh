@@ -46,7 +46,8 @@ done
 rm -rf "$OUTPUT_DIR"
 mkdir -p "$OUTPUT_DIR" "$(dirname "$OUTPUT_JAR")"
 
-BUILD_ID="${CARPLAY_BUILD_ID:-2026-08-06-main-release}"
+# Generate BUILD_ID from the build date and current Git commit.
+BUILD_ID="$(date +%Y-%m-%d)-$(git -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || echo 'nogit')"
 echo "Build ID: $BUILD_ID"
 
 HOOK_FILE="$SRC_DIR/com/luka/carplay/CarPlayHook.java"
